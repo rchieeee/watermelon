@@ -1,0 +1,6 @@
+Place your dataset in this folder as:
+
+    watermelon_irrigation.csv
+
+Required header row (column order does not matter):
+timestamp,soil_moisture_pct,temperature_c,humidity_pct,rain_probability_12h_pct,rainfall_forecast_12h_mm,growth_stage,irrigation_needed,watering_duration_min,next_irrigation_hours

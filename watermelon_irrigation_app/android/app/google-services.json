@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "75304847457",
+    "firebase_url": "https://watermelon-674c0-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "watermelon-674c0",
+    "storage_bucket": "watermelon-674c0.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:75304847457:android:ba66339151fa81b6b7c220",
+        "android_client_info": {
+          "package_name": "com.example.watermelon_irrigation"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCtIzl9aJgXCVfADiPKbua4ghWesTP6zEc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
