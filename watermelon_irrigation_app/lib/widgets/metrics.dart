@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../models/soil_sensor_reading.dart';
 import '../theme/app_theme.dart';
 import 'data_kind.dart';
 import 'layout.dart';
@@ -51,10 +52,14 @@ class MetricTile extends StatelessWidget {
 }
 
 /// Soil moisture gets the full width and a bar, because it is the main
-/// field reading behind the irrigation decision.
+/// field reading behind the irrigation decision. With [sensors], it also
+/// lists each soil sensor (1, 2, 3) under it.
 class SoilMoistureTile extends StatelessWidget {
-  const SoilMoistureTile({super.key, required this.valuePct});
+  const SoilMoistureTile({super.key, required this.valuePct, this.sensors = const []});
+
+  /// Sensor 1 on the main ESP32, which is the reading the pump uses.
   final double? valuePct;
+  final List<SoilSensorStatus> sensors;
 
   static String _pct(double v) => '${v.toStringAsFixed(v % 1 == 0 ? 0 : 1)}%';
 
@@ -63,16 +68,66 @@ class SoilMoistureTile extends StatelessWidget {
     final v = valuePct;
     return MetricTile(
       icon: Icons.water_drop,
-      label: 'Soil moisture',
+      label: sensors.isEmpty
+          ? 'Soil moisture'
+          : 'Soil moisture · sensor 1 (controls the pump)',
       value: v == null ? null : _pct(v),
       unavailableLabel: 'Soil moisture unavailable',
       accent: Palette.leaf,
       footer: v == null
           ? null
-          : Semantics(
-              label: 'Soil moisture ${v.round()} percent',
-              child: _MoistureBar(v, height: 12),
+          : Column(children: [
+              Semantics(
+                label: 'Soil moisture ${v.round()} percent',
+                child: _MoistureBar(v, height: 12),
+              ),
+              if (sensors.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                const Divider(height: 1, color: Palette.line),
+                for (final sensor in sensors) _SensorRow(sensor),
+              ],
+            ]),
+    );
+  }
+}
+
+/// "Sensor 2   [bar]   65%", or "Offline" / "Sensor error" instead.
+class _SensorRow extends StatelessWidget {
+  const _SensorRow(this.sensor);
+  final SoilSensorStatus sensor;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final pct = sensor.moisturePct;
+    final problem = !sensor.online ? 'Offline' : (pct == null ? 'Sensor error' : null);
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Semantics(
+        label: 'Sensor ${sensor.number}: '
+            '${problem ?? '${pct!.round()} percent'}',
+        excludeSemantics: true,
+        child: Row(children: [
+          SizedBox(
+            width: 76,
+            child: Text('Sensor ${sensor.number}',
+                style: t.bodyMedium?.copyWith(color: Palette.muted)),
+          ),
+          Expanded(
+            child: pct == null ? const SizedBox.shrink() : _MoistureBar(pct, height: 8),
+          ),
+          SizedBox(
+            width: 96,
+            child: Text(
+              problem ?? SoilMoistureTile._pct(pct!),
+              textAlign: TextAlign.right,
+              style: problem != null
+                  ? t.bodyMedium?.copyWith(color: Palette.flesh)
+                  : t.titleMedium,
             ),
+          ),
+        ]),
+      ),
     );
   }
 }

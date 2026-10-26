@@ -1,6 +1,8 @@
 // Smart Irrigation for Watermelon - ESP32 + Firebase Realtime Database
-// Hardware: 1 ESP32 (the only controller), 1 capacitive soil moisture sensor
-// v2.0 on GPIO34, DHT11, relay + pump, optional SSD1306 OLED. Wi-Fi only.
+// Main board: soil sensor 1 (capacitive v2.0 on GPIO34), DHT11, relay + pump,
+// optional SSD1306 OLED. Wi-Fi only. This board uses ONLY its own soil
+// sensor (sensor 1) for the pump. Sensors 2 and 3 are separate boards
+// (soil_node_2, soil_node_3); the app shows them, this board ignores them.
 // Soil is sampled once each second in a dedicated ESP32 task. That task also
 // stops the pump when the soil reaches 70%, on a bad soil reading,
 // or at the run-time limit.
@@ -85,6 +87,12 @@ const uint32_t APP_STOP_PAUSE_MS = 60UL * 60 * 1000;
 const uint32_t DHT_INTERVAL_MS = 5000;
 const uint32_t STAGE_POLL_MS = 10UL * 1000; // How often the app's growth stage is read.
 
+// ---- Sensor 1 in /irrigation/sensors/soil_1 ----
+// Same format as the node boards (soil_2, soil_3), so the app can show all
+// three sensors side by side. This board does not read sensors 2 and 3.
+const uint32_t SENSOR_LIVE_MS = 5UL * 1000;    // Sensor 1 to sensors/soil_1/live.
+const uint32_t SENSOR_HISTORY_MS = 60UL * 1000; // Sensor 1 to sensors/soil_1/history.
+
 struct Advice {
   bool irrigate;
   const char* shortCode;
@@ -128,6 +136,8 @@ uint32_t lastLiveAt = 0, lastHistoryAt = 0, lastDhtAt = 0;
 uint32_t lastHistoryTryAt = 0;
 uint32_t lastControlPoll = 0, appPausedAt = 0, processedSequence = 0;
 uint32_t lastStagePoll = 0;
+uint32_t lastSensorLiveAt = 0, lastSensorHistoryAt = 0;
+bool sensorLiveSent = false, sensorHistorySent = false;
 String growthStage = ""; // From /irrigation/settings/growth_stage; empty until read.
 bool historySent = false, historyAttempted = false, liveSent = false, appPaused = false;
 
@@ -532,6 +542,32 @@ void checkGrowthStage() {
   }
 }
 
+// Sensor 1 (this board) to /irrigation/sensors/soil_1, in the same format
+// the node boards use, so the app can show all three sensors the same way.
+String buildSensorJson(const SoilState& s) {
+  JsonDocument doc;
+  doc["timestamp"][".sv"] = "timestamp";
+  if (s.soilPercent >= 0) doc["soil_moisture_pct"] = s.soilPercent;
+  doc["raw"] = s.soilRaw;
+  String out;
+  serializeJson(doc, out);
+  return out;
+}
+
+void publishSensor1() {
+  SoilState s = snapshot();
+  if (!sensorLiveSent || (uint32_t)(millis() - lastSensorLiveAt) >= SENSOR_LIVE_MS) {
+    lastSensorLiveAt = millis();
+    sensorLiveSent = true;
+    firebaseSend("PUT", "/irrigation/sensors/soil_1/live", buildSensorJson(s));
+  }
+  if (!sensorHistorySent || (uint32_t)(millis() - lastSensorHistoryAt) >= SENSOR_HISTORY_MS) {
+    lastSensorHistoryAt = millis();
+    sensorHistorySent = true;
+    firebaseSend("POST", "/irrigation/sensors/soil_1/history", buildSensorJson(s));
+  }
+}
+
 void readClimate() {
   lastDhtAt = millis();
   float t = dht.readTemperature(), h = dht.readHumidity();
@@ -707,7 +743,10 @@ void loop() {
     fetchWeather();
   }
   wasConnected = connected;
-  if (connected) checkGrowthStage();
+  if (connected) {
+    checkGrowthStage();
+    if (snapshot().sequence != 0) publishSensor1(); // To sensors/soil_1.
+  }
   if (!connected && (uint32_t)(millis() - lastWifiTry) >= WIFI_RETRY_MS) {
     lastWifiTry = millis();
     // Start a clean attempt; reconnect() errors while one is still running.

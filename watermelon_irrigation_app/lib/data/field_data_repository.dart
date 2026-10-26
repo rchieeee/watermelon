@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../models/field_observation.dart';
+import '../models/soil_sensor_reading.dart';
 
 /// Where field observations come from. The prototype reads a CSV asset;
 /// a Firebase or REST implementation can replace it without touching the UI.
@@ -19,6 +20,9 @@ abstract class LiveFieldRepository implements FieldDataRepository {
 
   /// Each new live reading from the field controller, as it arrives.
   Stream<FieldObservation> get liveReadings;
+
+  /// Each new reading from any of the soil sensors, as it arrives.
+  Stream<SoilSensorReading> get soilSensorReadings;
 }
 
 class DatasetNotFoundException implements Exception {

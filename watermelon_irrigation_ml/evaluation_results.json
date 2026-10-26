@@ -1,0 +1,93 @@
+{
+  "dataset_rows": 24162,
+  "train_rows": 16124,
+  "test_rows": 8038,
+  "split": "season-based: seasons 1-4 train, seasons 5-6 test",
+  "irrigation_needed": {
+    "model": "RandomForestClassifier(n_estimators=100, max_depth=10, min_samples_leaf=3, class_weight=balanced)",
+    "accuracy": 0.9899,
+    "precision": 0.9094,
+    "recall": 0.9704,
+    "f1": 0.9389,
+    "confusion_matrix [[TN, FP], [FN, TP]]": [
+      [
+        7335,
+        62
+      ],
+      [
+        19,
+        622
+      ]
+    ],
+    "positive_rate_test": 0.0797,
+    "agreement_with_decision_table": 0.9939
+  },
+  "watering_duration_min": {
+    "model": "RandomForestRegressor(n_estimators=100, max_depth=10, min_samples_leaf=3)",
+    "train_rows": 1308,
+    "test_rows": 641,
+    "MAE": 0.632,
+    "RMSE": 0.803,
+    "R2": 0.981,
+    "baseline_MAE_predict_mean": 4.735
+  },
+  "next_irrigation_hours": {
+    "model": "RandomForestRegressor(n_estimators=100, max_depth=12, min_samples_leaf=5)",
+    "train_rows": 14816,
+    "test_rows": 7397,
+    "MAE": 6.504,
+    "RMSE": 10.607,
+    "R2": 0.744,
+    "within_6_hours": 0.655,
+    "baseline_MAE_predict_mean": 17.284,
+    "note": "Values are capped at 72 h (no irrigation expected within 3 days)."
+  },
+  "feature_importance": {
+    "irrigation_needed": {
+      "soil_moisture_pct": 0.685,
+      "temperature_c": 0.11,
+      "humidity_pct": 0.103,
+      "hour": 0.048,
+      "rain_probability_12h_pct": 0.025,
+      "rainfall_forecast_12h_mm": 0.021,
+      "stage_germination": 0.004,
+      "stage_fruiting": 0.002,
+      "stage_vine_development": 0.001,
+      "stage_flowering": 0.001
+    },
+    "watering_duration_min": {
+      "soil_moisture_pct": 0.542,
+      "stage_germination": 0.258,
+      "stage_flowering": 0.191,
+      "temperature_c": 0.002,
+      "humidity_pct": 0.002,
+      "rain_probability_12h_pct": 0.002,
+      "hour": 0.002,
+      "rainfall_forecast_12h_mm": 0.001,
+      "stage_vine_development": 0.0,
+      "stage_fruiting": 0.0
+    },
+    "next_irrigation_hours": {
+      "soil_moisture_pct": 0.641,
+      "rainfall_forecast_12h_mm": 0.132,
+      "hour": 0.066,
+      "stage_germination": 0.05,
+      "stage_vine_development": 0.037,
+      "temperature_c": 0.022,
+      "rain_probability_12h_pct": 0.021,
+      "humidity_pct": 0.015,
+      "stage_flowering": 0.009,
+      "stage_fruiting": 0.007
+    }
+  },
+  "onnx_size_mb": {
+    "irrigation_needed": 0.65,
+    "watering_duration": 1.43,
+    "next_irrigation_hours": 5.05
+  },
+  "onnx_vs_sklearn_max_difference": {
+    "irrigation_needed": 5.562732812158799e-07,
+    "watering_duration": 1.5189271714177721e-05,
+    "next_irrigation_hours": 6.006842632189091e-05
+  }
+}

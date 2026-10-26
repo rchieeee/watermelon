@@ -1,0 +1,9 @@
+{
+  "timestamp": "2026-09-27T10:30:00",
+  "soil_moisture_pct": 36.0,
+  "temperature_c": 31.0,
+  "humidity_pct": 65.0,
+  "rain_probability_12h_pct": 20.0,
+  "rainfall_forecast_12h_mm": 0.3,
+  "growth_stage": "flowering"
+}

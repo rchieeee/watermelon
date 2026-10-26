@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import '../data/field_data_repository.dart';
 import '../models/field_observation.dart';
 import '../models/irrigation_prediction.dart';
+import '../models/soil_sensor_reading.dart';
 import '../services/irrigation_prediction_service.dart';
 import '../services/field_control_service.dart';
 
@@ -53,6 +54,34 @@ class FieldController extends ChangeNotifier {
   /// Re-checks [controllerOnline] even when no new reading arrives.
   Timer? _clock;
   bool _wasOnline = false;
+
+  /// Soil sensor 1 is on the main ESP32; 2 and 3 are separate node boards.
+  static const soilSensorCount = 3;
+
+  /// Newest reading from each soil sensor, by sensor number.
+  final Map<int, SoilSensorReading> _sensors = {};
+
+  /// Only a live source (Firebase) has per-sensor readings.
+  bool get hasSoilSensors => repository is LiveFieldRepository;
+
+  /// Each sensor for the Soil moisture card. A sensor with no new reading
+  /// for [offlineAfter] is offline (board unpowered or no Wi-Fi).
+  List<SoilSensorStatus> get soilSensors => [
+        for (var n = 1; n <= soilSensorCount; n++) _sensorStatus(n),
+      ];
+
+  SoilSensorStatus _sensorStatus(int n) {
+    final r = _sensors[n];
+    final online = r != null && DateTime.now().difference(r.timestamp) < offlineAfter;
+    return SoilSensorStatus(
+      number: n,
+      online: online,
+      moisturePct: online ? r.moisturePct : null,
+    );
+  }
+
+  String _sensorsOnlineKey() => soilSensors.map((s) => s.online ? '1' : '0').join();
+  String _lastSensorsKey = '';
 
   bool get canSetGrowthStage => fieldControl != null;
 
@@ -129,6 +158,7 @@ class FieldController extends ChangeNotifier {
 
   StreamSubscription<void>? _changes;
   StreamSubscription<FieldObservation>? _liveSub;
+  StreamSubscription<SoilSensorReading>? _sensorSub;
 
   /// Updates the screen with every live reading, and reloads quietly when
   /// other data (prediction, growth stage) changes.
@@ -137,10 +167,17 @@ class FieldController extends ChangeNotifier {
     if (repo is! LiveFieldRepository || _changes != null) return;
     _changes = repo.changes.listen((_) => load(quiet: true));
     _liveSub = repo.liveReadings.listen(_onLive);
+    _sensorSub = repo.soilSensorReadings.listen((r) {
+      _sensors[r.number] = r;
+      _lastSensorsKey = _sensorsOnlineKey();
+      if (status == LoadStatus.ready) notifyListeners();
+    });
     _clock = Timer.periodic(const Duration(seconds: 5), (_) {
       final online = controllerOnline;
-      if (online != _wasOnline) {
+      final sensorsKey = _sensorsOnlineKey();
+      if (online != _wasOnline || sensorsKey != _lastSensorsKey) {
         _wasOnline = online;
+        _lastSensorsKey = sensorsKey;
         notifyListeners();
       }
     });
@@ -170,6 +207,7 @@ class FieldController extends ChangeNotifier {
   void dispose() {
     _changes?.cancel();
     _liveSub?.cancel();
+    _sensorSub?.cancel();
     _clock?.cancel();
     _startTimer?.cancel();
     super.dispose();

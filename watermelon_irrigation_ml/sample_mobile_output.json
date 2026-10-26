@@ -1,0 +1,7 @@
+{
+  "irrigation_needed": 1,
+  "irrigation_probability": 0.9008,
+  "watering_duration_min": 36.2,
+  "next_irrigation_hours": 0.0,
+  "status": "IRRIGATION_REQUIRED"
+}

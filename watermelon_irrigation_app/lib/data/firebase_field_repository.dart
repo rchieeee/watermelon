@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:firebase_database/firebase_database.dart';
 
 import '../models/field_observation.dart';
+import '../models/soil_sensor_reading.dart';
 import 'field_data_repository.dart';
 
 /// Reads the ESP32's readings from Firebase Realtime Database.
@@ -12,11 +13,17 @@ import 'field_data_repository.dart';
 ///   irrigation/history/{pushId}     saved readings
 ///   irrigation/settings/growth_stage   set by the farmer (text)
 ///   irrigation/prediction           written by the ML service
+///   irrigation/sensors/soil_N/live  each soil sensor (N = 1..3); soil_1 is
+///                                   the main ESP32, 2 and 3 are node boards
 class FirebaseFieldRepository implements LiveFieldRepository {
-  FirebaseFieldRepository({required FirebaseDatabase database, this.historyLimit = 3000})
-      : _db = database;
+  FirebaseFieldRepository({
+    required FirebaseDatabase database,
+    this.historyLimit = 3000,
+    this.soilSensorCount = 3,
+  }) : _db = database;
 
   final FirebaseDatabase _db;
+  final int soilSensorCount;
 
   /// 3000 entries at one per 15 minutes is about 30 days.
   final int historyLimit;
@@ -35,6 +42,41 @@ class FirebaseFieldRepository implements LiveFieldRepository {
       .map((e) => _parse(e.snapshot.value, _stage))
       .where((o) => o != null)
       .cast<FieldObservation>();
+
+  /// Each sensor board writes irrigation/sensors/soil_N/live every 5 seconds.
+  @override
+  Stream<SoilSensorReading> get soilSensorReadings {
+    final subs = <StreamSubscription<DatabaseEvent>>[];
+    late final StreamController<SoilSensorReading> controller;
+    controller = StreamController<SoilSensorReading>(
+      onListen: () {
+        for (var n = 1; n <= soilSensorCount; n++) {
+          subs.add(_root.child('sensors/soil_$n/live').onValue.listen((e) {
+            final r = _parseSensor(n, e.snapshot.value);
+            if (r != null) controller.add(r);
+          }));
+        }
+      },
+      onCancel: () async {
+        for (final s in subs) {
+          await s.cancel();
+        }
+      },
+    );
+    return controller.stream;
+  }
+
+  static SoilSensorReading? _parseSensor(int number, Object? value) {
+    if (value is! Map) return null;
+    final ts = value['timestamp'];
+    if (ts is! num) return null;
+    final pct = value['soil_moisture_pct'];
+    return SoilSensorReading(
+      number: number,
+      timestamp: DateTime.fromMillisecondsSinceEpoch(ts.toInt()),
+      moisturePct: pct is num ? pct.toDouble() : null,
+    );
+  }
 
   /// Fires when the ML service writes a new prediction or the growth stage
   /// changes. Live readings come through [liveReadings] instead.

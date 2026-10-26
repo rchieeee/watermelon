@@ -1,5 +1,5 @@
 # ESP32 private settings (Wi-Fi password, API keys)
-smart_irrigation_esp32/secrets.h
+**/secrets.h
 
 # Arduino build output
 build/
@@ -10,3 +10,7 @@ build/
 .DS_Store
 Thumbs.db
 .vscode/
+
+# Python
+__pycache__/
+*.pyc

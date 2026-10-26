@@ -1,0 +1,12 @@
+column,type,unit,role,description
+timestamp,datetime,local time,input (hour derived),Time of the observation (every 30 minutes)
+soil_moisture_pct,float,% (0 = dry to 100 = saturated),input,Average soil moisture from the calibrated soil sensors
+temperature_c,float,°C,input,Air temperature (DHT sensor)
+humidity_pct,float,%,input,Relative humidity (DHT sensor)
+rain_probability_12h_pct,float,%,input,Forecast probability of rain in the next 12 hours (OpenWeatherMap)
+rainfall_forecast_12h_mm,float,mm,input,Forecast rainfall in the next 12 hours (OpenWeatherMap)
+growth_stage,category,-,input,"germination, vine_development, flowering, or fruiting"
+irrigation_needed,int (0/1),-,target (classification),1 = soil below 40% and rain probability below 50% (ESP32 decision table)
+watering_duration_min,float,minutes,target (regression),Minutes needed to raise soil to the stage target (0 when not needed)
+next_irrigation_hours,float,hours,target (regression),Hours until irrigation is next needed (0 when needed now; capped at 72)
+season_id,int,-,split only,Simulated season number; used for the train/test split and not a model input

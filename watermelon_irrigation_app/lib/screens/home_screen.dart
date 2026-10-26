@@ -33,7 +33,10 @@ class HomeScreen extends StatelessWidget {
           ],
 
           SectionHeader(title: 'Current conditions', kind: readingKind),
-          SoilMoistureTile(valuePct: o.soilMoisturePct),
+          SoilMoistureTile(
+            valuePct: o.soilMoisturePct,
+            sensors: c.hasSoilSensors ? c.soilSensors : const [],
+          ),
           const SizedBox(height: 12),
           TileRow(
             left: MetricTile(

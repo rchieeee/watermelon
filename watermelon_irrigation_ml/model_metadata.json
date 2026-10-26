@@ -1,0 +1,49 @@
+{
+  "feature_columns": [
+    "soil_moisture_pct",
+    "temperature_c",
+    "humidity_pct",
+    "rain_probability_12h_pct",
+    "rainfall_forecast_12h_mm",
+    "hour",
+    "growth_stage"
+  ],
+  "numeric_features": [
+    "soil_moisture_pct",
+    "temperature_c",
+    "humidity_pct",
+    "rain_probability_12h_pct",
+    "rainfall_forecast_12h_mm",
+    "hour"
+  ],
+  "categorical_features": [
+    "growth_stage"
+  ],
+  "growth_stage_values": [
+    "germination",
+    "vine_development",
+    "flowering",
+    "fruiting"
+  ],
+  "hour_definition": "hour + minute/60 of the reading's local time (e.g. 10:30 -> 10.5)",
+  "model_type": "RandomForest (scikit-learn), exported with skl2onnx",
+  "onnx_inputs": "one [N,1] tensor per feature; growth_stage is a string tensor",
+  "onnx_outputs": {
+    "irrigation_needed": "label (int64) and probabilities (float [N,2], column 1 = needed)",
+    "watering_duration": "minutes (float [N,1])",
+    "next_irrigation_hours": "hours (float [N,1])"
+  },
+  "post_processing": [
+    "Reject growth stages not in growth_stage_values (the model cannot handle them).",
+    "If irrigation_needed = 1: next_irrigation_hours = 0.",
+    "If irrigation_needed = 0: watering_duration_min = 0.",
+    "Clamp watering_duration_min >= 0 and next_irrigation_hours to 0..72."
+  ],
+  "seed": 42,
+  "dataset_rows": 24162,
+  "notes": [
+    "Synthetic dataset from a field simulation (src/generate_dataset.py).",
+    "irrigation_needed labels follow the ESP32 decision table (soil < 40% and rain probability < 50%).",
+    "Retrain and validate on real field data before deployment."
+  ]
+}
