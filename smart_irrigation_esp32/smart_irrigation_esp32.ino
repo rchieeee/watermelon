@@ -1,14 +1,16 @@
 // Smart Irrigation for Watermelon - ESP32 + Firebase Realtime Database
 // Main board: soil sensor 1 (capacitive v2.0 on GPIO34), DHT11, relay + pump,
-// optional SSD1306 OLED. Wi-Fi only. This board uses ONLY its own soil
-// sensor (sensor 1) for the pump. Sensors 2 and 3 are separate boards
-// (soil_node_2, soil_node_3); the app shows them, this board ignores them.
+// optional SSD1306 OLED. Wi-Fi only. Sensors 2 and 3 are separate boards
+// (soil_node_2, soil_node_3) that write to /irrigation/sensors/soil_N. This
+// board reads them and the pump uses the AVERAGE of all sensors with a fresh,
+// valid reading (an offline or faulty sensor is left out).
 // Soil is sampled once each second in a dedicated ESP32 task. That task also
-// stops the pump when the soil reaches 70%, on a bad soil reading,
+// stops the pump when the average reaches 70%, when no sensor has a reading,
 // or at the run-time limit.
 // Network calls run in loop(), so a slow request cannot delay pump shutoff.
 // Readings go to /irrigation/live every 2 seconds and to /irrigation/history.
-// Auto watering starts below 60% soil and stops when the soil reaches 70%.
+// Auto watering starts below 60% average soil and stops when it reaches 70%.
+// It does not start when the rain chance in the next 12 hours is 50% or more.
 // In the "Vine growth" stage chosen in the app
 // (/irrigation/settings/growth_stage) it also needs 29 C or hotter to start.
 // ArduinoJson v7, Adafruit DHT, Adafruit GFX, Adafruit SSD1306 required.
@@ -64,6 +66,8 @@ const int RAW_MIN_VALID = 100, RAW_MAX_VALID = 4000;
 // The pump turns on below MOIST_DRY and off at MOIST_WET or higher. The gap
 // between them stops the relay clicking on and off.
 const int MOIST_DRY = 60, MOIST_WET = 70;
+// Rain chance (next 12 h) at or above RAIN_MID: no watering, recheck in
+// 6-12 h. At or above RAIN_HIGH: no watering, wait 12-24 h / after the rain.
 const float RAIN_MID = 0.50f, RAIN_HIGH = 0.70f;
 // Vine growth (set in the app): the pump turns on only when the soil is
 // below MOIST_DRY AND the air is at least this hot. If the DHT has no
@@ -87,9 +91,14 @@ const uint32_t APP_STOP_PAUSE_MS = 60UL * 60 * 1000;
 const uint32_t DHT_INTERVAL_MS = 5000;
 const uint32_t STAGE_POLL_MS = 10UL * 1000; // How often the app's growth stage is read.
 
-// ---- Sensor 1 in /irrigation/sensors/soil_1 ----
-// Same format as the node boards (soil_2, soil_3), so the app can show all
-// three sensors side by side. This board does not read sensors 2 and 3.
+// ---- Three soil sensors: the pump uses their AVERAGE ----
+// Sensor 1 is on this board (GPIO34). Sensors 2 and 3 are separate ESP32
+// boards (soil_node_2, soil_node_3) that write /irrigation/sensors/soil_N/live.
+// Example: 50%, 80%, 85% -> average 72% -> pump OFF (70% or more).
+const int SENSOR_COUNT = 3;
+const uint32_t NODE_POLL_MS = 5UL * 1000;      // How often sensors 2 and 3 are read.
+const uint32_t NODE_STALE_MS = 30UL * 1000;    // No new reading this long = offline.
+// Sensor 1 is also saved in the same format as the node boards.
 const uint32_t SENSOR_LIVE_MS = 5UL * 1000;    // Sensor 1 to sensors/soil_1/live.
 const uint32_t SENSOR_HISTORY_MS = 60UL * 1000; // Sensor 1 to sensors/soil_1/history.
 
@@ -112,6 +121,12 @@ enum class RunMode : uint8_t { AUTO, APP, TEST };
 struct SoilState {
   int soilRaw = -1;      // Averaged analogRead value (0-4095); -1 = not read yet.
   int soilPercent = -1;  // 0-100%; -1 = invalid reading.
+  // Latest readings from sensors 2 and 3 (index 1, 2), written by loop().
+  int nodePct[SENSOR_COUNT] = {-1, -1, -1};
+  uint32_t nodeSeenAt[SENSOR_COUNT] = {0, 0, 0}; // millis() of the last NEW reading.
+  // Worked out by the soil task every second:
+  int freshPct[SENSOR_COUNT] = {-1, -1, -1};   // Each sensor's %, or -1 if invalid/offline.
+  int average = -1;      // Average of freshPct (what the pump uses); -1 = none.
   uint32_t sequence = 0;
   bool pumpOn = false;
   RunMode mode = RunMode::AUTO;
@@ -137,6 +152,9 @@ uint32_t lastHistoryTryAt = 0;
 uint32_t lastControlPoll = 0, appPausedAt = 0, processedSequence = 0;
 uint32_t lastStagePoll = 0;
 uint32_t lastSensorLiveAt = 0, lastSensorHistoryAt = 0;
+uint32_t lastNodePoll = 0;
+// Each node's last Firebase timestamp, to tell a new reading from an old one.
+uint64_t nodeLastTimestamp[SENSOR_COUNT] = {0, 0, 0};
 bool sensorLiveSent = false, sensorHistorySent = false;
 String growthStage = ""; // From /irrigation/settings/growth_stage; empty until read.
 bool historySent = false, historyAttempted = false, liveSent = false, appPaused = false;
@@ -229,7 +247,9 @@ String buildReadingJson(float wateringMin) {
   SoilState s = snapshot();
   JsonDocument doc;
   doc["timestamp"][".sv"] = "timestamp";
-  if (s.soilPercent >= 0) doc["soil_moisture_pct"] = s.soilPercent;
+  // The average of the soil sensors (what the pump uses). Each sensor's own
+  // value is in /irrigation/sensors/soil_N/live.
+  if (s.average >= 0) doc["soil_moisture_pct"] = s.average;
   if (!isnan(temperature)) doc["temperature_c"] = round(temperature * 10) / 10.0;
   if (!isnan(humidity)) doc["humidity_pct"] = round(humidity);
   if (weatherUsable()) {
@@ -275,6 +295,8 @@ void updateDisplay(const SoilState& s) {
   display.setTextColor(SSD1306_WHITE);
   display.setTextSize(2);
   display.setCursor(0, 0);
+  // Only this board's own sensor is shown. The average of the 3 sensors
+  // (what the pump uses) is shown in the mobile app.
   if (s.soilPercent >= 0) { display.print(s.soilPercent); display.print('%'); }
   else display.print("--%");
   display.setTextSize(1);
@@ -383,6 +405,20 @@ void soilTask(void*) {
     xSemaphoreTake(soilMutex, portMAX_DELAY);
     state.soilRaw = soilRaw;
     state.soilPercent = soilPercent;
+    // Sensor 1 is read right here; sensors 2 and 3 count only while their
+    // board has sent a new reading within NODE_STALE_MS.
+    state.freshPct[0] = soilPercent;
+    for (int i = 1; i < SENSOR_COUNT; i++) {
+      bool fresh = state.nodeSeenAt[i] != 0 &&
+                   (uint32_t)(now - state.nodeSeenAt[i]) < NODE_STALE_MS;
+      state.freshPct[i] = fresh ? state.nodePct[i] : -1;
+    }
+    int total = 0, used = 0;
+    for (int i = 0; i < SENSOR_COUNT; i++) {
+      if (state.freshPct[i] >= 0) { total += state.freshPct[i]; used++; }
+    }
+    int average = used ? (total + used / 2) / used : -1; // Rounded.
+    state.average = average;
     state.sequence++;
     if (state.pumpOn) {
       uint32_t elapsed = (uint32_t)(now - state.pumpStartedAt);
@@ -391,9 +427,9 @@ void soilTask(void*) {
       } else if (state.mode == RunMode::APP) {
         // Manual from the app: soil moisture does not stop it.
         if (elapsed >= APP_MAX_RUN_MS) stopped = StopReason::APP_LIMIT;
-      } else if (soilPercent < 0) {
-        stopped = StopReason::SENSOR_ERROR;
-      } else if (soilPercent >= MOIST_WET) {
+      } else if (average < 0) {
+        stopped = StopReason::SENSOR_ERROR; // No sensor has a reading.
+      } else if (average >= MOIST_WET) {
         stopped = StopReason::WATERED;
       } else if (elapsed >= PUMP_MAX_RUN_MS) {
         stopped = StopReason::MAX_TIME;
@@ -405,6 +441,7 @@ void soilTask(void*) {
     if (!state.pumpOn) relaySet(false);
     bool pumpNow = state.pumpOn;
     xSemaphoreGive(soilMutex);
+    // Only this board's own sensor is logged; the average is in the app.
     if (soilPercent < 0)
       Serial.printf("Soil: raw=%d OUT OF RANGE (%d-%d) - check sensor wiring | pump=%s\n",
                     soilRaw, RAW_MIN_VALID, RAW_MAX_VALID, pumpNow ? "ON" : "OFF");
@@ -568,6 +605,33 @@ void publishSensor1() {
   }
 }
 
+// Reads sensors 2 and 3 from /irrigation/sensors/soil_N/live. A reading
+// counts as new only when its Firebase timestamp changes, so a board that
+// stopped sending drops out after NODE_STALE_MS (no shared clock needed).
+void checkNodes() {
+  if (lastNodePoll != 0 && (uint32_t)(millis() - lastNodePoll) < NODE_POLL_MS) return;
+  lastNodePoll = millis();
+  for (int i = 1; i < SENSOR_COUNT; i++) {
+    String body = firebaseGet("/irrigation/sensors/soil_" + String(i + 1) + "/live");
+    if (body.isEmpty() || body == "null") continue;
+    JsonDocument doc;
+    if (deserializeJson(doc, body) != DeserializationError::Ok) continue;
+    uint64_t ts = doc["timestamp"] | (uint64_t)0;
+    if (ts == 0 || ts == nodeLastTimestamp[i]) continue; // Nothing new.
+    bool firstLook = nodeLastTimestamp[i] == 0;
+    nodeLastTimestamp[i] = ts;
+    // The first reading seen after boot may be days old, so it does not
+    // count; the next new one does (about 5 s later).
+    if (firstLook) continue;
+    JsonVariant pct = doc["soil_moisture_pct"];
+    xSemaphoreTake(soilMutex, portMAX_DELAY);
+    state.nodePct[i] = pct.is<int>() ? constrain(pct.as<int>(), 0, 100) : -1;
+    state.nodeSeenAt[i] = millis();
+    if (state.nodeSeenAt[i] == 0) state.nodeSeenAt[i] = 1; // 0 means "never".
+    xSemaphoreGive(soilMutex);
+  }
+}
+
 void readClimate() {
   lastDhtAt = millis();
   float t = dht.readTemperature(), h = dht.readHumidity();
@@ -615,15 +679,17 @@ void fetchWeather() {
 }
 
 void controlCycle(const SoilState& s) {
-  if (s.soilPercent < 0) {
+  if (s.average < 0) {
     decision = "SENS ERR";
-    advStatus = "Sensor error - not watering";
-    advSuggested = "Check soil sensor wiring";
+    advStatus = "No soil sensor has a reading - not watering";
+    advSuggested = "Check soil sensor wiring and the sensor boards";
     adviceValid = false;
     return;
   }
-  // Soil moisture only for now: the rain forecast does not affect the pump.
-  Advice a = getAdvice(s.soilPercent, false, 0);
+  // Rain forecast: when the soil is dry but the 12-hour rain chance is
+  // RAIN_MID (50%) or more, the pump waits for the rain instead of watering.
+  // Without a recent forecast (no Wi-Fi), it decides on soil moisture only.
+  Advice a = getAdvice(s.average, weatherUsable(), rainChance); // Average of the sensors.
   if (growthStage == "vine_development" && a.irrigate) {
     if (isnan(temperature)) {
       a.status = "Irrigation needed (soil only - no temperature reading)";
@@ -745,7 +811,8 @@ void loop() {
   wasConnected = connected;
   if (connected) {
     checkGrowthStage();
-    if (snapshot().sequence != 0) publishSensor1(); // To sensors/soil_1.
+    checkNodes();                                   // Sensors 2 and 3.
+    if (snapshot().sequence != 0) publishSensor1(); // Sensor 1 to sensors/soil_1.
   }
   if (!connected && (uint32_t)(millis() - lastWifiTry) >= WIFI_RETRY_MS) {
     lastWifiTry = millis();

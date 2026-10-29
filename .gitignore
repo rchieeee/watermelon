@@ -1,16 +1,1 @@
-# ESP32 private settings (Wi-Fi password, API keys)
-**/secrets.h
 
-# Arduino build output
-build/
-*.bin
-*.elf
-
-# OS / editor files
-.DS_Store
-Thumbs.db
-.vscode/
-
-# Python
-__pycache__/
-*.pyc

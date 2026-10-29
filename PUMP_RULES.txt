@@ -1,0 +1,82 @@
+WATERMELON SMART IRRIGATION - PUMP RULES
+========================================
+
+The main ESP32 (smart_irrigation_esp32) decides when the pump turns on
+and off. It uses the AVERAGE soil moisture of the 3 sensors, the 12-hour
+rain forecast, the growth stage chosen in the app, and (in Vine growth
+only) the temperature. "Soil" in the tables below means this average.
+
+Example: sensor 1 = 50%, sensor 2 = 80%, sensor 3 = 85%
+         average = (50 + 80 + 85) / 3 = 72%  ->  pump OFF (70% or more)
+
+- A sensor that is offline (no new reading for 30 seconds) or has an
+  invalid reading is left out of the average.
+- Without Wi-Fi the main board cannot get sensors 2 and 3, so it uses
+  sensor 1 only.
+
+
+1. VINE GROWTH
+--------------
+
+Soil            Rain chance     Temperature       Pump                        Screen
+--------------  --------------  ----------------  --------------------------  --------
+below 60%       below 50%       29 C or higher    ON                          IRRIGATE
+below 60%       below 50%       below 29 C        OFF                         HOLD
+below 60%       50-69%          any               OFF, checks again later     MONITOR
+below 60%       70% or higher   any               OFF, rain is coming         RAIN
+60-69%          any             any               stays as it is              HOLD
+70% or higher   any             any               OFF                         NO NEED
+
+
+2. FLOWERING AND FRUIT SET (temperature doesn't matter)
+-------------------------------------------------------
+
+Soil            Rain chance     Pump                        Screen
+--------------  --------------  --------------------------  --------
+below 60%       below 50%       ON                          IRRIGATE
+below 60%       50-69%          OFF, checks again later     MONITOR
+below 60%       70% or higher   OFF, rain is coming         RAIN
+60-69%          any             stays as it is              HOLD
+70% or higher   any             OFF                         NO NEED
+
+
+3. SPECIAL CASES
+----------------
+
+- No temperature reading (DHT11 problem): Vine growth ignores the 29 C
+  condition and decides on soil and rain, so the vines are not left dry.
+- No rain forecast (no Wi-Fi, or the forecast is more than 3 hours old):
+  the pump decides on soil moisture only.
+- Rain does not stop a pump that is already running. Once watering
+  starts, it continues until the soil reaches 70%.
+- No sensor has a valid reading (all offline or raw below 100 / above
+  4000): the pump stays OFF and the screen shows SENS ERR.
+- Automatic watering stops after 5 minutes if the soil has not reached
+  70%, and locks until 'c' is sent in the Serial Monitor (screen: LOCKED).
+- "Turn pump off" in the app pauses automatic watering for 1 hour
+  (screen: PAUSED). "Turn pump on" in the app ignores all these rules and
+  runs until "Turn pump off" (30-minute safety limit).
+
+
+4. WHERE HUMIDITY IS USED
+-------------------------
+
+Place              Humidity
+-----------------  -----------------------------------------------------
+Pump (ESP32)       not used
+OLED screen        shown as H:78%
+Mobile app         Humidity tile under Current conditions
+Database history   saved with every reading
+ML model           one of its inputs (about 10% of the "water or not"
+                   decision)
+
+
+5. SETTINGS (top of smart_irrigation_esp32.ino)
+-----------------------------------------------
+
+MOIST_DRY        = 60      pump turns on below this soil %
+MOIST_WET        = 70      pump turns off at this soil % or higher
+RAIN_MID         = 0.50    rain chance (50%) at which watering waits
+RAIN_HIGH        = 0.70    rain chance (70%) treated as "rain is coming"
+VINE_TEMP_ON     = 29.0    Vine growth needs this temperature (C) or higher
+PUMP_MAX_RUN_MS  = 5 min   longest automatic watering run

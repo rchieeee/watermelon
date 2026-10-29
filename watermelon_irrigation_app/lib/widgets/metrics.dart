@@ -53,11 +53,11 @@ class MetricTile extends StatelessWidget {
 
 /// Soil moisture gets the full width and a bar, because it is the main
 /// field reading behind the irrigation decision. With [sensors], it also
-/// lists each soil sensor (1, 2, 3) under it.
+/// lists each soil sensor (1, 2, 3) under the average.
 class SoilMoistureTile extends StatelessWidget {
   const SoilMoistureTile({super.key, required this.valuePct, this.sensors = const []});
 
-  /// Sensor 1 on the main ESP32, which is the reading the pump uses.
+  /// The average of the soil sensors, which is what the pump uses.
   final double? valuePct;
   final List<SoilSensorStatus> sensors;
 
@@ -66,11 +66,12 @@ class SoilMoistureTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final v = valuePct;
+    final used = sensors.where((s) => s.moisturePct != null).length;
     return MetricTile(
       icon: Icons.water_drop,
       label: sensors.isEmpty
           ? 'Soil moisture'
-          : 'Soil moisture · sensor 1 (controls the pump)',
+          : 'Soil moisture · average of $used of ${sensors.length} sensors (controls the pump)',
       value: v == null ? null : _pct(v),
       unavailableLabel: 'Soil moisture unavailable',
       accent: Palette.leaf,
